@@ -228,5 +228,52 @@ Exiting Main Thread
 
 http://www.runoob.com/python/python-multithreading.html
 
+```
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+from queue import Queue
+import threading
+import time
+
+class myThread(threading.Thread):
+    def __init__(self, target, args=(), kwargs=None):
+        super(myThread, self).__init__(target=target, args=args, kwargs=kwargs)
+
+    def run(self):
+        pass
+
+if __name__ == "__main__":
+    queueLock = threading.Lock()
+    workQueue = Queue(10)
+    threadList = ["Thread-1", "Thread-2", "Thread-3"]
+    nameList = ["One", "Two", "Three", "Four", "Five"]
+    threads = []
+
+    # 定义退出标志
+    exitFLag = 0
+
+    # 填充队列
+    for work in nameList:
+        workQueue.put(work)
+
+    # 数据处理函数
+    def process_data(threadName, wq):
+        while not exitFLag:
+            queueLock.acquire()
+            if not workQueue.empty():
+                data = wq.get()
+                queueLock.release()
+                print("{} processing {}".format(threadName, data))
+            else:
+                queueLock.release()
+                time.sleep(1)
+
+    # 创建线程
+    for tname in threadList:
+        thread = myThread(target=process_data)
+
+```
+
 
 
