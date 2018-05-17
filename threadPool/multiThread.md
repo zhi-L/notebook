@@ -226,7 +226,8 @@ Exiting Thread-2
 Exiting Main Thread
 ```
 
-http://www.runoob.com/python/python-multithreading.html
+Python的Queue模块中提供了同步的、线程安全的队列类，能够在多线程中直接使用。可以使用队列来实现线程间的同步。
+下面这个例子会创建三个线程和五个任务。异步的处理完线程后退出。
 
 ```
 #!/usr/bin/python
@@ -241,39 +242,128 @@ class myThread(threading.Thread):
         super(myThread, self).__init__(target=target, args=args, kwargs=kwargs)
 
     def run(self):
-        pass
+        try:
+            if self._target:
+                print('Starting {}'.format(self._args[0]))
+                self._target(*self._args, **self._kwargs)
+                print('Exiting {}'.format(self._args[0]))
+        finally:
+            # Avoid a refcycle if the thread is running a function with
+            # an argument that has a member that points to the thread.
+            del self._target, self._args, self._kwargs
+
+# 数据处理函数
+def process_data(threadName, wq):
+    while not exitFLag:
+        queueLock.acquire()
+        if not workQueue.empty():
+            time.sleep(1)
+            data = wq.get()
+            queueLock.release()
+            print("{} processing {}".format(threadName, data))
+        else:
+            queueLock.release()
+            time.sleep(1)
 
 if __name__ == "__main__":
     queueLock = threading.Lock()
     workQueue = Queue(10)
     threadList = ["Thread-1", "Thread-2", "Thread-3"]
-    nameList = ["One", "Two", "Three", "Four", "Five"]
+    workNameList = ["One", "Two", "Three", "Four", "Five"]
     threads = []
 
     # 定义退出标志
     exitFLag = 0
 
-    # 填充队列
-    for work in nameList:
+    # 填充任务队列
+    for work in workNameList:
         workQueue.put(work)
 
-    # 数据处理函数
-    def process_data(threadName, wq):
-        while not exitFLag:
-            queueLock.acquire()
-            if not workQueue.empty():
-                data = wq.get()
-                queueLock.release()
-                print("{} processing {}".format(threadName, data))
-            else:
-                queueLock.release()
-                time.sleep(1)
-
     # 创建线程
-    for tname in threadList:
-        thread = myThread(target=process_data)
+    for threadName in threadList:
+        thread = myThread(target=process_data, args=(threadName, workQueue))
+        thread.start()
+        threads.append(thread)
+
+    # 等待任务被处理完
+    while not workQueue.empty():
+        pass
+
+    # 通知线程结束循环
+    exitFLag = 1
+
+    # 等待所有的进程完成
+    for t in threads:
+        t.join()
+    print("Exiting Main Thread.")
 
 ```
 
+执行结果如下
+```
+Starting Thread-1
+Starting Thread-2
+Starting Thread-3
+Thread-1 processing One
+Thread-2 processing Two
+Thread-3 processing Three
+Thread-1 processing Four
+Thread-2 processing Five
+Exiting Thread-2
+Exiting Thread-3
+Exiting Thread-1
+Exiting Main Thread.
+```
+
+## 线程池
+通过上面的介绍，基本就介绍完了Python中多线程的基本使用了。但是因为GIL的存在，使得Python中的多线程比较的鸡肋，甚至连官方的线程池都没有。下面简单介绍下第三方的线程池，并主要讲下如何自己实现一个线程池。
+
+### concurrent.futures
+python3中自带的，python2的话需要安装futures模块。
+
+```
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+import concurrent.futures
+import urllib.request
+
+URLS = ['http://www.foxnews.com/',
+        'http://www.cnn.com/',
+        'http://europe.wsj.com/',
+        'http://www.bbc.co.uk/',
+        'http://some-made-up-domain.com/']
+
+# Retrieve a single page and report the URL and contents
+def load_url(url, timeout):
+    with urllib.request.urlopen(url, timeout=timeout) as conn:
+        return conn.read()
+
+# We can use a with statement to ensure threads are cleaned up promptly
+with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    # Start the load operations and mark each future with its URL
+    future_to_url = {executor.submit(load_url, url, 60): url for url in URLS}
+    for future in concurrent.futures.as_completed(future_to_url):
+        url = future_to_url[future]
+        try:
+            data = future.result()
+        except Exception as exc:
+            print('%r generated an exception: %s' % (url, exc))
+        else:
+            print('%r page is %d bytes' % (url, len(data)))
+```
+执行结果如下
+```
+'http://some-made-up-domain.com/' generated an exception: <urlopen error [Errno -2] Name or service not known>
+'http://www.cnn.com/' page is 169879 bytes
+'http://www.foxnews.com/' page is 238516 bytes
+'http://www.bbc.co.uk/' page is 303508 bytes
+'http://europe.wsj.com/' page is 960476 bytes
+```
+
+http://www.dongwm.com/archives/%E4%BD%BF%E7%94%A8Python%E8%BF%9B%E8%A1%8C%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B-PoolExecutor%E7%AF%87/
+
+
+JOB：创建一个可以控制最小和最大线程数的线程池，通过守护进程检测任务数和存活线程数，任务数较多时，增加线程数至最大线程。任务数子较少时，将线程数维持在最小数量。
 
 
